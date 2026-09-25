@@ -1,7 +1,8 @@
 local env=getfenv()
 if env.Rem and env.Rem.Destroy then env.Rem:Destroy() end
+if env.Rimuru and env.Rimuru.Destroy then env.Rimuru:Destroy() end
 if env["Nine".."MfgUI"] and env["Nine".."MfgUI"].Destroy then env["Nine".."MfgUI"]:Destroy() end
-assert(Drawing and Drawing.new,"rem requires the Matcha Drawing API")
+assert(Drawing and Drawing.new,"rimuru requires the Matcha Drawing API")
 local V,RGB=Vector2.new,Color3.fromRGB
 local unpackArgs=table.unpack or unpack
 local themes={
@@ -14,11 +15,12 @@ local black,white=RGB(0,0,0),RGB(255,255,255)
 local function clamp(n,a,b) return math.max(a,math.min(b,n)) end
 local function mix(a,b,t) return Color3.new(a.R+(b.R-a.R)*t,a.G+(b.G-a.G)*t,a.B+(b.B-a.B)*t) end
 local function short(s,n) s=tostring(s or "");return #s>n and s:sub(1,n-3).."..." or s end
-local app={StartupSound=true,Effects=true,ReducedMotion=false,EffectStrength=0.8,PixelRem=true,Alive=true,Tabs={},Theme="Purple",Keybind=0xA1,Visible=true}
-env.Rem=app;env["Nine".."MfgUI"]=app
+local app={StartupSound=true,Effects=true,ReducedMotion=false,EffectStrength=0.8,PixelRem=true,Alive=true,Tabs={},Theme="Purple",Keybind=0xA1,Visible=true,_idRegistry={}}
+env.Rem=app;env.Rimuru=app;env["Nine".."MfgUI"]=app
 local run=game:GetService("RunService")
 local workspace=game:GetService("Workspace")
-local mouse=game:GetService("Players").LocalPlayer:GetMouse()
+local players=game:GetService("Players")
+local mouse=players.LocalPlayer:GetMouse()
 local pool,animations,notices={},{open=0},{}
 local sequence,frame,connection=0,0,nil
 local x,y,S,W,H=100,100,1,800,450
@@ -44,21 +46,12 @@ local introDone=false
 local introStart=nil
 local introSound=nil
 local introChimed=false
-local introBytes=nil
-local introGlowBytes=nil
 local motionClock=0
 local visitTime=0
 local pulsePoints={}
 
--- background state
-local REM_BG_URL="https://images-wixmp-ed30a86b8c4ca887773594c2.wixmp.com/f/d99d9d8b-0a39-4f7a-b561-b8ea33173646/dcwmtfm-430980b4-774c-4a1b-a7fa-606f544a4a3a.png/v1/fill/w_900,h_507,q_80,strp/rimuru_tempest_wallpaper_1366x768_by_gameriuxlt_dcwmtfm-fullview.jpg?token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1cm46YXBwOjdlMGQxODg5ODIyNjQzNzNhNWYwZDQxNWVhMGQyNmUwIiwiaXNzIjoidXJuOmFwcDo3ZTBkMTg4OTgyMjY0MzczYTVmMGQ0MTVlYTBkMjZlMCIsIm9iaiI6W1t7ImhlaWdodCI6Ijw9NTA3IiwicGF0aCI6Ii9mL2Q5OWQ5ZDhiLTBhMzktNGY3YS1iNTYxLWI4ZWEzMzE3MzY0Ni9kY3dtdGZtLTQzMDk4MGI0LTc3NGMtNGExYi1hN2ZhLTYwNmY1NDRhNGEzYS5wbmciLCJ3aWR0aCI6Ijw9OTAwIn1dXSwiYXVkIjpbInVybjpzZXJ2aWNlOmltYWdlLm9wZXJhdGlvbnMiXX0.0M9Y8nHwZ0PLPrrFaQVmRPUqKbUmMF5cxVOpI9o2DJw"
-local REM_BG_BYTES=nil
-local imageReady=false
+-- background state (self-contained: drawn, no network)
 local imageFailed=false
-
-PIXEL_REM_AWAKE=PIXEL_REM_AWAKE or {}
-PIXEL_REM_SLEEP=PIXEL_REM_SLEEP or {}
-base64decode=base64decode or function(s) return s end
 
 local PIXEL_REM_LINES={"Oh hi","<3","Nice!","Sob"}
 
@@ -120,7 +113,7 @@ local function line(id,x1,y1,x2,y2,c,opacity,z,thickness)
  d.Thickness=math.max(1,(thickness or 1.65)*S);d.Color=c;d.Transparency=a*opacity;d.ZIndex=z or 45;d.Visible=a*opacity>0.005
 end
 local paths={
- rem={{2,10,10,1},{10,1,18,10},{18,10,10,19},{10,19,2,10},{6,10,10,5},{10,5,14,10},{14,10,10,15},{10,15,6,10}},
+ rimuru={{2,10,10,1},{10,1,18,10},{18,10,10,19},{10,19,2,10},{6,10,10,5},{10,5,14,10},{14,10,10,15},{10,15,6,10}},
  spark={{10,1,12,8},{12,8,19,10},{19,10,12,12},{12,12,10,19},{10,19,8,12},{8,12,1,10},{1,10,8,8},{8,8,10,1}},
  layers={{2,6,10,2},{10,2,18,6},{18,6,10,10},{10,10,2,6},{2,10,10,14},{10,14,18,10},{2,14,10,18},{10,18,18,14}},
  bolt={{11,1,3,11},{3,11,9,11},{9,11,8,19},{8,19,17,8},{17,8,11,8},{11,8,11,1}},
@@ -169,11 +162,15 @@ function app:SetAvatarData(bytes)
  avatarBytes=bytes;self.AvatarStatus="ready"
 end
 local function httpGetBytes(url)
+ local ok,body=pcall(function()
+  return game:HttpGet(url,{["User-Agent"]="Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+ end)
+ if ok and type(body)=="string" and #body>8 then return body end
  local requestFn=env.request or env.http_request
  if type(requestFn)~="function" and type(env.http)=="table" then requestFn=env.http.request end
  if type(requestFn)=="function" then
-  local ok,response=pcall(requestFn,{Url=url,Method="GET",Timeout=10})
-  if ok then
+  local ok2,response=pcall(requestFn,{Url=url,Method="GET",Timeout=10})
+  if ok2 then
    if type(response)=="string" then return response end
    if type(response)=="table" then
     local status=tonumber(response.StatusCode or response.Status or 200)
@@ -182,17 +179,16 @@ local function httpGetBytes(url)
   end
  end
  if type(env.httpget)=="function" then
-  local ok,body=pcall(env.httpget,url);if ok and type(body)=="string" then return body end
+  local ok3,body2=pcall(env.httpget,url);if ok3 and type(body2)=="string" then return body2 end
  end
- local ok,body=pcall(function() return game:HttpGet(url) end)
- if ok and type(body)=="string" then return body end
  return nil
 end
+local function isPng(b) return type(b)=="string" and b:sub(1,8)=="\137PNG\13\10\26\10" end
 local function loadAvatar()
  app.AvatarStatus="loading"
  task.spawn(function()
   local ok=pcall(function()
-   local player=game:GetService("Players").LocalPlayer
+   local player=players.LocalPlayer
    local userId=tonumber(player and player.UserId)
    if not userId or userId<=0 then return end
    local endpoint="https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds="..math.floor(userId).."&size=100x100&format=Png&isCircular=false"
@@ -206,7 +202,7 @@ local function loadAvatar()
       if url:match("^https://[%w%-%.]+%.rbxcdn%.com/") then
        local bytes=httpGetBytes(url)
        if not app.Alive then return end
-       if bytes and bytes:sub(1,8)=="\137PNG\13\10\26\10" then app:SetAvatarData(bytes);return end
+       if isPng(bytes) then app:SetAvatarData(bytes);return end
       end
      end
     end
@@ -216,15 +212,6 @@ local function loadAvatar()
   if app.Alive and not avatarBytes then app.AvatarStatus=ok and "unavailable" or "failed" end
  end)
 end
-
--- Preload background image (runs once)
-task.spawn(function()
- local bytes=httpGetBytes(REM_BG_URL)
- if type(bytes)=="string" and (#bytes>8) and
-    (bytes:sub(1,8)=="\137PNG\13\10\26\10" or bytes:sub(1,3)=="\255\216\255") then
-  REM_BG_BYTES=bytes
- end
-end)
 
 local function hit(px,py,w,h,modal)
  local normalAllowed=not closeConfirm and not closeConfirmClosing and not closingStarted
@@ -262,14 +249,21 @@ function app:SetKeybind(vk)
  assert(type(vk)=="number" and vk>=8 and vk<=254 and vk==math.floor(vk) and vk~=27,"Use a VK key code (8..254), except Escape")
  self.Keybind=vk;previousKey=iskeypressed(vk)
 end
+function app:GetKeybind() return self.Keybind end
+function app:GetValue(id) local c=self._idRegistry[id];return c and c.Value or nil end
+function app:SetValue(id,value,silent) local c=self._idRegistry[id];if c and c.SetValue then c:SetValue(value,silent) end end
 function app:Destroy()
  if not self.Alive then return end
  self.Alive=false
  if connection then connection:Disconnect() end
  if introSound then pcall(function() introSound:Destroy() end);introSound=nil end
- for _,e in pairs(pool) do pcall(function() e.d:Remove() end) end
- pool={};notices={}
+ for _,e in pairs(pool) do pcall(function()
+  if e.d.Data~=nil then e.d.Data=nil end
+  e.d:Remove()
+ end) end
+ pool={};notices={};animations={}
  if env.Rem==self then env.Rem=nil end
+ if env.Rimuru==self then env.Rimuru=nil end
  if env["Nine".."MfgUI"]==self then env["Nine".."MfgUI"]=nil end
 end
 local function requestClose()
@@ -298,16 +292,17 @@ function Control:SetValue(value,silent)
  elseif self.Kind=="slider" then value=clamp(tonumber(value) or self.Min,self.Min,self.Max);value=self.Min+math.floor((value-self.Min)/self.Step+0.5)*self.Step;value=clamp(value,self.Min,self.Max)
  elseif self.Kind=="dropdown" then
   local found=false;for _,item in ipairs(self.Options) do if item==value then found=true;break end end
-  assert(found,"Dropdown value must be one of its Options")
+  if not found then return self end
  end
  local changed=self.Value~=value;self.Value=value
  if changed and not silent then fire(self.Callback,value) end
  return self
 end
+local defaultIcons={button="bolt",toggle="power",slider="sliders",dropdown="layers",keybind="key",label="spark"}
 function Tab:_add(kind,o)
- assert(app.Alive,"rem has been destroyed")
+ assert(app.Alive,"rimuru has been destroyed")
  o=o or {};local c=setmetatable({Id=uid(),Kind=kind,Title=short(o.Title or kind,52),Description=short(o.Description or "",68),Callback=o.Callback},Control)
- c.Icon=o.Icon or ({button="bolt",toggle="power",slider="sliders",dropdown="layers",keybind="key",label="spark"})[kind]
+ c.Icon=o.Icon or defaultIcons[kind]
  c.ButtonText=short(o.ButtonText or "Run",9)
  c.Min=tonumber(o.Min) or 0;c.Max=tonumber(o.Max) or 100;c.Step=tonumber(o.Step) or 1
  if kind=="slider" then assert(c.Max>c.Min and c.Step>0,"Slider requires Max > Min and Step > 0") end
@@ -316,12 +311,18 @@ function Tab:_add(kind,o)
  if kind=="toggle" then c.Value=not not o.Default elseif kind=="slider" then c:SetValue(o.Default or c.Min,true)
  elseif kind=="dropdown" then c:SetValue(o.Default or c.Options[1],true) end
  animations[c.Id.."appear"]=0
- self.Controls[#self.Controls+1]=c;return c
+ self.Controls[#self.Controls+1]=c
+ if o.Id then
+  assert(not app._idRegistry[o.Id],"duplicate control Id: "..tostring(o.Id))
+  app._idRegistry[o.Id]=c;c.PublicId=o.Id
+ end
+ return c
 end
 function Tab:AddButton(o) return self:_add("button",o) end
 function Tab:AddToggle(o) return self:_add("toggle",o) end
 function Tab:AddSlider(o) return self:_add("slider",o) end
 function Tab:AddDropdown(o) return self:_add("dropdown",o) end
+function Tab:AddKeybind(o) return self:_add("keybind",o) end
 function Tab:AddLabel(o) if type(o)=="string" then o={Title=o} end;return self:_add("label",o) end
 local function replayTab(tab)
  animations.content=0;contentA=0;visitTime=motionClock;popup=nil;slide=nil;capture=nil
@@ -339,19 +340,26 @@ function Tab:Select()
  for i,t in ipairs(app.Tabs) do if t==self then tabOffset=clamp(tabOffset,math.max(0,i-5),i-1) end end
  return self
 end
-function app:AddTab(o)
+function app:AddTab(o,builder)
  if type(o)=="string" then o={Title=o} end
  o=o or {};local tab=setmetatable({Id=uid(),Title=short(o.Title or "Tab",18),Icon=o.Icon or "script",Controls={},Page=1},Tab)
  animations[tab.Id.."appear"]=0
- self.Tabs[#self.Tabs+1]=tab;if not selected then selected=tab end;return tab
+ self.Tabs[#self.Tabs+1]=tab;if not selected then selected=tab end
+ if type(builder)=="function" then
+  local ok,err=pcall(builder,tab)
+  if not ok then task.spawn(function()
+   if app.Alive then app:Notify({Title="Tab builder error",Content=tostring(err),Type="error",Duration=6}) end
+  end) end
+ end
+ return tab
 end
 local home=app:AddTab({Title="Home",Icon="home"});app.Home=home
 local settings=app:AddTab({Title="Settings",Icon="gear"});app.Settings=settings
 home:AddLabel({Title="Welcome.",Icon="home"})
-local themeControl=settings:AddDropdown({Title="Theme",Description="colors",Options={"Purple","Green","Blue","Black"},Default="Purple",Callback=function(v) app:SetTheme(v) end})
-settings:AddToggle({Title="Pixel Rimuru",Description="Click her when shes asleep.",Default=true,Callback=function(v) app.PixelRem=v end})
-settings:_add("keybind",{Title="Menu keybind",Description="Click to record a key. Escape cancels."})
-settings:AddButton({Title="Test notification",Description="Test.",Icon="info",ButtonText="Test",Callback=function()
+local themeControl=settings:AddDropdown({Id="theme",Title="Theme",Description="colors",Options={"Purple","Green","Blue","Black"},Default="Purple",Callback=function(v) app:SetTheme(v) end})
+settings:AddToggle({Id="pixel_rimuru",Title="Pixel Rimuru",Description="Click her when shes asleep.",Default=true,Callback=function(v) app.PixelRem=v end})
+settings:AddKeybind({Title="Menu keybind",Description="Click to record a key. Escape cancels."})
+settings:AddButton({Id="test_notify",Title="Test notification",Description="Test.",Icon="info",ButtonText="Test",Callback=function()
  app:Notify({Title="Notification test",Content="it works.",Type="success",Duration=5})
 end})
 
@@ -387,20 +395,45 @@ local function pixelHeart(id,px,py,alpha,z)
  box(id.."5",px+p,py+p*5,p*3,p,accent,alpha,0,z)
 end
 
+-- rimuru slime drawn from primitives (no external image needed)
+local function drawSlime(id,cx,cy,s,alpha,z,awake)
+ local bodyW,bodyH=34*s,26*s
+ local bodyCol=RGB(122,191,235)
+ local bodyLight=RGB(180,220,245)
+ local eyeCol=RGB(30,42,66)
+ box(id.."_shadow",cx-bodyW*.5,cy+bodyH*.5,bodyW,2*s,black,alpha*.18,2*s,z-1)
+ local rows=10
+ for i=0,rows-1 do
+  local t=i/(rows-1)
+  local rowW=bodyW*(0.55+0.45*math.sin(t*math.pi))
+  local rowY=cy-bodyH*.5+t*bodyH
+  local col=i<2 and bodyLight or bodyCol
+  box(id.."_b"..i,cx-rowW*.5,rowY,rowW,bodyH/rows+1,col,alpha,0,z)
+ end
+ box(id.."_hl",cx-bodyW*.28,cy-bodyH*.3,bodyW*.18,bodyH*.12,white,alpha*.7,2*s,z+1)
+ if awake then
+  box(id.."_eyeL",cx-bodyW*.18,cy-bodyH*.05,3*s,4*s,eyeCol,alpha,1*s,z+2)
+  box(id.."_eyeR",cx+bodyW*.10,cy-bodyH*.05,3*s,4*s,eyeCol,alpha,1*s,z+2)
+  box(id.."_shineL",cx-bodyW*.16,cy-bodyH*.03,1*s,1*s,white,alpha,0,z+3)
+  box(id.."_shineR",cx+bodyW*.12,cy-bodyH*.03,1*s,1*s,white,alpha,0,z+3)
+  box(id.."_mouth",cx-1.5*s,cy+bodyH*.18,3*s,1*s,eyeCol,alpha*.8,0,z+2)
+ else
+  box(id.."_eyeL",cx-bodyW*.18,cy,4*s,1.5*s,eyeCol,alpha,0,z+2)
+  box(id.."_eyeR",cx+bodyW*.10,cy,4*s,1.5*s,eyeCol,alpha,0,z+2)
+ end
+end
+
 local function renderPixelRem(now)
  local fade=ease("pixelRemVisible",app.PixelRem and app.Visible and introDone and 1 or 0,14)
- if fade<=0.005 or not PIXEL_REM_AWAKE[1] or not PIXEL_REM_SLEEP[1] then return end
+ if fade<=0.005 then return end
 
  local anchorX=W-146
  local hUI=164
  local wUI=hUI*(385/796)
  local seatRatio=.752
  local topY=-(hUI*seatRatio)
- local left=anchorX-wUI*.5
- local sx=x+left*S
- local sy=y+topY*S
- local sw=wUI*S
- local sh=hUI*S
+ local slimeCX=anchorX
+ local slimeCY=topY+hUI*.48
 
  if (not pixelRem.awake) and click and now>=pixelRem.reactUntil then
   local cx=x+anchorX*S
@@ -429,69 +462,20 @@ local function renderPixelRem(now)
   animations["pixelRemTalk"]=0
  end
 
- local showSleep=not pixelRem.awake
+ local showAwake=pixelRem.awake
  if pixelRem.awake then
-  local wakeAge=math.max(0,now-pixelRem.wakeStart)
-
-  if wakeAge<.10 then
-   showSleep=true
-  elseif wakeAge<.16 then
-   showSleep=false
-  elseif wakeAge<.22 then
-   showSleep=true
-  else
-   showSleep=false
+  if pixelRem.blinkAt==0 then pixelRem.blinkAt=now+2.8+math.random()*2.4 end
+  if now>=pixelRem.blinkAt and pixelRem.blinkUntil==0 then pixelRem.blinkUntil=now+.12 end
+  if pixelRem.blinkUntil>0 then
+   if now<pixelRem.blinkUntil then showAwake=false
+   else pixelRem.blinkUntil=0;pixelRem.blinkAt=now+2.8+math.random()*2.8 end
   end
-
-  if wakeAge>=.30 then
-   if pixelRem.blinkAt==0 then pixelRem.blinkAt=now+2.8+math.random()*2.4 end
-   if now>=pixelRem.blinkAt and pixelRem.blinkUntil==0 then pixelRem.blinkUntil=now+.12 end
-   if pixelRem.blinkUntil>0 then
-    if now<pixelRem.blinkUntil then
-     showSleep=true
-    else
-     pixelRem.blinkUntil=0
-     pixelRem.blinkAt=now+2.8+math.random()*2.8
-    end
-   end
-  end
-
-  if pixelRem.talk=="Sob" and math.floor((now-pixelRem.talkStart)*6)%2==0 then showSleep=true end
+  if pixelRem.talk=="Sob" and math.floor((now-pixelRem.talkStart)*6)%2==0 then showAwake=false end
  end
 
- bitmap("pixelRemSleepMaster",PIXEL_REM_SLEEP[1],sx,sy,sw,sh,showSleep and a*fade or 0,0,63)
- bitmap("pixelRemAwakeMaster",PIXEL_REM_AWAKE[1],sx,sy,sw,sh,(not showSleep) and a*fade or 0,0,63)
+ drawSlime("pixelRemSlime",slimeCX,slimeCY,S*1.6,a*fade,63,showAwake)
 
  box("pixelRemSeatShadow",anchorX-23,-2,46,2,black,.16*fade,0,59)
-
- local micro=math.floor(now*4)%4
- if not app.ReducedMotion then
-  if pixelRem.awake then
-   if micro==0 then
-    box("pixelRemHairPx1",left+wUI*.45,topY+hUI*.105,2,1,RGB(221,228,255),.48*fade,0,68)
-   elseif micro==1 then
-    box("pixelRemHairPx1",left+wUI*.48,topY+hUI*.105,2,1,RGB(221,228,255),.42*fade,0,68)
-    box("pixelRemHairPx2",left+wUI*.43,topY+hUI*.120,1,1,RGB(206,218,255),.35*fade,0,68)
-   elseif micro==2 then
-    box("pixelRemHairPx1",left+wUI*.51,topY+hUI*.105,1,1,RGB(221,228,255),.38*fade,0,68)
-   end
-
-   if micro==1 or micro==2 then
-    box("pixelRemRibbonPx1",left+wUI*.79,topY+hUI*.17,1,2,RGB(244,164,227),.42*fade,0,68)
-   end
-
-   if micro==0 or micro==3 then
-    box("pixelRemFootPx1",left+wUI*.78,topY+hUI*.925,2,1,RGB(255,239,244),.54*fade,0,68)
-   end
-  else
-   local sm=math.floor((now-pixelRem.sleepStart)*2)%4
-   if sm==1 then
-    box("pixelRemSleepHairPx",left+wUI*.39,topY+hUI*.115,2,1,RGB(211,221,255),.28*fade,0,68)
-   elseif sm==3 then
-    box("pixelRemSleepSleevePx",left+wUI*.26,topY+hUI*.56,1,1,RGB(248,232,248),.24*fade,0,68)
-   end
-  end
- end
 
  if not pixelRem.awake then
   local sleepAge=math.max(0,now-pixelRem.sleepStart)
@@ -561,18 +545,18 @@ end
 local function renderControl(c,py,index)
  local id=c.Id;local px=contentLeft;local width=761-px
  local enter=ease(id.."appear",(app.ReducedMotion or motionClock-visitTime>(index-1)*0.045) and 1 or 0,13)
- local contentA=contentA*enter
+ local cardA=contentA*enter
  py=py+(1-enter)*10
  local hovered=hit(px,py,width,65)
  local hover=ease(id.."cardhover",hovered and 1 or 0,14)
  local surface=mix(tint,white,0.035+hover*0.022)
- box(id.."border",px-hover,py-hover,width+hover*2,65+hover*2,mix(ink,accent,hover),(.065+hover*.13)*contentA,12,22)
- box(id.."card",px+1,py+1,width-2,63,surface,(.48+hover*.14)*contentA,11,23)
- box(id.."badge",px+13,py+17,31,31,accent,(.055+hover*.07)*contentA,9,25)
- icon(id.."customicon",c.Icon,px+18.5,py+22.5-hover*2,mix(muted,accent,hover),contentA,28,hover*.08,1+hover*.1)
+ box(id.."border",px-hover,py-hover,width+hover*2,65+hover*2,mix(ink,accent,hover),(.065+hover*.13)*cardA,12,22)
+ box(id.."card",px+1,py+1,width-2,63,surface,(.48+hover*.14)*cardA,11,23)
+ box(id.."badge",px+13,py+17,31,31,accent,(.055+hover*.07)*cardA,9,25)
+ icon(id.."customicon",c.Icon,px+18.5,py+22.5-hover*2,mix(muted,accent,hover),cardA,28,hover*.08,1+hover*.1)
  local right=c.Kind=="label" and 0 or 195
- label(id.."title",short(c.Title,right>0 and 28 or 52),px+57+hover*3,py+13,14,ink,contentA,true)
- label(id.."description",short(c.Description,right>0 and 38 or 66),px+57+hover*3,py+37,11,muted,contentA)
+ label(id.."title",short(c.Title,right>0 and 28 or 52),px+57+hover*3,py+13,14,ink,cardA,true)
+ label(id.."description",short(c.Description,right>0 and 38 or 66),px+57+hover*3,py+37,11,muted,cardA)
  if hovered and click and not app.ReducedMotion then
   pulsePoints[#pulsePoints+1]={x=clamp((mx-x)/S,px+10,px+width-10),y=clamp((my-y)/S,py+10,py+55),time=motionClock}
   if #pulsePoints>6 then table.remove(pulsePoints,1) end
@@ -580,38 +564,38 @@ local function renderControl(c,py,index)
  if c.Kind=="button" then
   local over=hit(650,py+15,94,34)
   local pulse=ease(id.."press",0,9)
-  box(id.."button",650+pulse*2,py+15+pulse,94-pulse*4,34-pulse*2,accent,(0.14+pulse*0.25+ease(id.."hover",over and 0.13 or 0))*contentA,9,30)
-  label(id.."run",c.ButtonText,667,py+24,12,ink,contentA,true);icon(id.."arrow","right",717,py+22,accent,contentA)
+  box(id.."button",650+pulse*2,py+15+pulse,94-pulse*4,34-pulse*2,accent,(0.14+pulse*0.25+ease(id.."hover",over and 0.13 or 0))*cardA,9,30)
+  label(id.."run",c.ButtonText,667,py+24,12,ink,cardA,true);icon(id.."arrow","right",717,py+22,accent,cardA)
   if over and click then click=false;animations[id.."press"]=1;fire(c.Callback) end
  elseif c.Kind=="toggle" then
   local v=ease(id.."switch",c.Value and 1 or 0)
-  glow(id.."toggleGlow",699,py+25,38,16,v*contentA,29)
-  box(id.."switch",695,py+21,46,24,mix(muted,accent,v),(0.16+v*0.5)*contentA,12,30)
-  box(id.."knob",699+22*v,py+25,16,16,ink,contentA,8,31)
+  glow(id.."toggleGlow",699,py+25,38,16,v*cardA,29)
+  box(id.."switch",695,py+21,46,24,mix(muted,accent,v),(0.16+v*0.5)*cardA,12,30)
+  box(id.."knob",699+22*v,py+25,16,16,ink,cardA,8,31)
   if hit(680,py+12,65,42) and click then click=false;c:SetValue(not c.Value) end
  elseif c.Kind=="dropdown" then
   local over=hit(579,py+15,165,35)
-  box(id.."select",579,py+15,165,35,ink,(0.055+ease(id.."hover",over and 0.065 or 0))*contentA,8,30)
-  label(id.."value",short(c.Value,17),592,py+25,12,ink,contentA,true)
+  box(id.."select",579,py+15,165,35,ink,(0.055+ease(id.."hover",over and 0.065 or 0))*cardA,8,30)
+  label(id.."value",short(c.Value,17),592,py+25,12,ink,cardA,true)
   local rotate=ease(id.."rotate",popup and popup.control==c and not popup.Closing and 1 or 0)
-  line(id.."chevron1",724,py+30+5*rotate,729,py+35-5*rotate,accent,contentA)
-  line(id.."chevron2",729,py+35-5*rotate,734,py+30+5*rotate,accent,contentA)
+  line(id.."chevron1",724,py+30+5*rotate,729,py+35-5*rotate,accent,cardA)
+  line(id.."chevron2",729,py+35-5*rotate,734,py+30+5*rotate,accent,cardA)
   if over and click then click=false;popup={control=c,x=579,y=math.min(py+53,H-186),offset=0};animations.dropdown=0 end
  elseif c.Kind=="keybind" then
-  box(id.."key",579,py+15,165,35,accent,(0.07+ease(id.."record",capture and 0.16 or hit(579,py+15,165,35) and 0.06 or 0))*contentA,8,30)
-  icon(id.."keyicon","key",588,py+22,accent,contentA)
-  label(id.."value",capture and "Press a key..." or keyName(app.Keybind),617,py+25,12,ink,contentA,true)
+  box(id.."key",579,py+15,165,35,accent,(0.07+ease(id.."record",capture and 0.16 or hit(579,py+15,165,35) and 0.06 or 0))*cardA,8,30)
+  icon(id.."keyicon","key",588,py+22,accent,cardA)
+  label(id.."value",capture and "Press a key..." or keyName(app.Keybind),617,py+25,12,ink,cardA,true)
   if hit(579,py+15,165,35) and click then click=false;beginCapture() end
  elseif c.Kind=="slider" then
   local sx,sw=584,156
-  label(id.."value",string.format("%.2f",ease(id.."number",c.Value,18)):gsub("%.?0+$",""),680,py+8,11,accent,contentA,true)
+  label(id.."value",string.format("%.2f",ease(id.."number",c.Value,18)):gsub("%.?0+$",""),680,py+8,11,accent,cardA,true)
   if hit(sx-6,py+26,sw+12,28) and click then slide=c;click=false end
   if slide==c and down and active and not popup and not capture then c:SetValue(c.Min+clamp((mx-x-sx*S)/(sw*S),0,1)*(c.Max-c.Min)) end
   local t=ease(id.."fill",(c.Value-c.Min)/(c.Max-c.Min))
-  box(id.."track",sx,py+39,sw,3,ink,0.14*contentA,2,30)
-  box(id.."fill",sx,py+39,sw*t,3,accent,contentA,2,31)
-  glow(id.."sliderGlow",sx+sw*t-3,py+37,7,7,contentA,30)
-  box(id.."thumb",sx+sw*t-5,py+35,11,11,ink,contentA,6,32)
+  box(id.."track",sx,py+39,sw,3,ink,0.14*cardA,2,30)
+  box(id.."fill",sx,py+39,sw*t,3,accent,cardA,2,31)
+  glow(id.."sliderGlow",sx+sw*t-3,py+37,7,7,cardA,30)
+  box(id.."thumb",sx+sw*t-5,py+35,11,11,ink,cardA,6,32)
  end
 end
 local function renderPopup()
@@ -744,7 +728,6 @@ local function renderCloseEffects(now)
  return false
 end
 
--- Measure text width safely (falls back if TextBounds isn't available)
 local function measureText(value,size,bold)
  local d=obj("__measure","Text")
  d.Text=tostring(value);d.Size=math.floor(size+0.5)
@@ -752,7 +735,7 @@ local function measureText(value,size,bold)
  d.Visible=false
  local ok,bounds=pcall(function() return d.TextBounds end)
  if ok and type(bounds)=="Vector2" then return bounds.X end
- return #tostring(value)*size*0.55  -- rough fallback
+ return #tostring(value)*size*0.55
 end
 
 local function renderIntro(now,vp)
@@ -777,7 +760,10 @@ local function renderIntro(now,vp)
     local sound=Instance.new("Sound");introSound=sound
     sound.SoundId="rbxasset://sounds/electronicpingshort.wav"
     sound.Volume=.12;sound.PlaybackSpeed=1.18
-    sound.Parent=game:GetService("SoundService");sound:Play()
+    local ok2=pcall(function()
+     sound.Parent=game:GetService("SoundService");sound:Play()
+    end)
+    if not ok2 then introSound=nil end
    end)
   end) end
  end
@@ -796,12 +782,40 @@ local function renderIntro(now,vp)
  local wordW=measureText(word,wordSize,true)
  local wordX=cx - wordW/2
 
- -- echo behind
  txt("intro:echo",word,wordX-2*scale,wordY+1*scale,wordSize,white,wordAlpha*(1-wordT)*.22,true,116)
- -- main
  txt("intro:word",word,wordX,wordY,wordSize,white,wordAlpha,true,117)
 
- -- sweep bar centered under the word
+ local slimeAlpha=opacity*wordT
+ if slimeAlpha>.01 then
+  local slimeSize=wordSize*0.9
+  local slimeCX=wordX-slimeSize*0.9
+  local slimeCY=wordY+slimeSize*0.45
+  local s=slimeSize/44
+  local function slimeBox(id,bx,by,bw,bh,c,alpha,r)
+   local d=obj("intro:"..id,"Square")
+   d.Position=V(bx,by);d.Size=V(bw,bh);d.Color=c
+   d.Transparency=clamp(alpha,0,1);d.Corner=r or 0;d.ZIndex=115
+   d.Visible=alpha>0.005
+  end
+  local bodyW,bodyH=34*s,26*s
+  local bodyCol=RGB(122,191,235)
+  local bodyLight=RGB(180,220,245)
+  local eyeCol=RGB(30,42,66)
+  local rows=10
+  for i=0,rows-1 do
+   local t=i/(rows-1)
+   local rowW=bodyW*(0.55+0.45*math.sin(t*math.pi))
+   local rowY=slimeCY-bodyH*.5+t*bodyH
+   local col=i<2 and bodyLight or bodyCol
+   slimeBox("b"..i,slimeCX-rowW*.5,rowY,rowW,bodyH/rows+1,col,slimeAlpha,0)
+  end
+  slimeBox("hl",slimeCX-bodyW*.28,slimeCY-bodyH*.3,bodyW*.18,bodyH*.12,white,slimeAlpha*.7,2*s)
+  slimeBox("eyeL",slimeCX-bodyW*.18,slimeCY-bodyH*.05,3*s,4*s,eyeCol,slimeAlpha,1*s)
+  slimeBox("eyeR",slimeCX+bodyW*.10,slimeCY-bodyH*.05,3*s,4*s,eyeCol,slimeAlpha,1*s)
+  slimeBox("shL",slimeCX-bodyW*.16,slimeCY-bodyH*.03,1*s,1*s,white,slimeAlpha,0)
+  slimeBox("shR",slimeCX+bodyW*.12,slimeCY-bodyH*.03,1*s,1*s,white,slimeAlpha,0)
+ end
+
  local lock=smooth((elapsed-1.64)/.34)
  local sweepW=wordW*lock
  rect("intro:logoSweep",
@@ -858,7 +872,7 @@ local function render()
  end
  local b=1-math.exp(-dt*9);local theme=themes[targetTheme]
  tint=mix(tint,theme.Base,b);ink=mix(ink,theme.Text,b);muted=mix(muted,theme.Muted,b);accent=mix(accent,theme.Accent,b)
- themeControl.Value=app.Theme
+ if themeControl.Value~=app.Theme then themeControl:SetValue(app.Theme,true) end
  local restY=y;y=y+(1-a)*15*S
  local sidebarOver=hit(10,10,sidebarWidth,H-20) and not slide and not drag
  if sidebarOver then sidebarLeaveTime=now end
@@ -872,25 +886,9 @@ local function render()
   box("rim",-1,-1,W+2,H+2,ink,0.13,18,9)
   box("base",0,0,W,H,tint,.68,17,10)
 
-  -- === BACKGROUND IMAGE ===
-  if not imageFailed and REM_BG_BYTES then
-   local ok=pcall(function()
-    local image=obj("background","Image")
-    if not imageReady then
-     image.Data=REM_BG_BYTES
-     image.Color=white
-     imageReady=true
-    end
-    image.Position=V(x,y)
-    image.Size=V(W*S,H*S)
-    image.Rounding=17*S
-    image.Transparency=0.42*a
-    image.ZIndex=11
-    image.Visible=true
-   end)
-   if not ok then imageFailed=true end
-  end
-  -- ========================
+  -- self-contained background (gradient, no network)
+  box("bgTop",0,0,W,H*.5,mix(tint,accent,.05),.30,17,11)
+  box("bgBot",0,H*.5,W,H*.5,mix(tint,black,.18),.30,17,11)
 
   box("tint",0,0,W,H,tint,0.18,17,12)
   if app.Effects then
@@ -917,12 +915,12 @@ local function render()
   box("brandBadge",25,25,35,35,accent,.12,10,20)
   glow("brandHalo",30,30,25,25,.8,18)
   if not bitmap("brandPortrait",avatarBytes,x+26*S,y+26*S,33*S,33*S,a,9*S,42) then
-   icon("brandMark","rem",32.5,32.5,accent,1,42)
+   icon("brandMark","rimuru",32.5,32.5,accent,1,42)
   end
   label("brand","rimuru",70,25,27,ink,sidebarText,true)
 
   box("headerRule",contentLeft,78,761-contentLeft,1,ink,.075,0,20)
-  label("sectionSub",selected==home and "" or selected==settings and "" or "",contentLeft+1,59,11,muted,contentA)
+  label("sectionSub","",contentLeft+1,59,11,muted,contentA)
 
   for i=1,math.min(5,#app.Tabs-tabOffset) do
    local tab=app.Tabs[i+tabOffset];local enter=ease(tab.Id.."appear",1,11);local py=101+(i-1)*53+(1-enter)*9
@@ -937,7 +935,7 @@ local function render()
   end
   if #app.Tabs>5 then
    smallButton("tabsprev","up",29+16*sidebarOpen,350+24*sidebarOpen,function() tabOffset=math.max(0,tabOffset-1) end)
-   smallButton("tabsnext","down",29+87*sidebarOpen,381-7*sidebarOpen,function() tabOffset=math.min(#app.Tabs-5,tabOffset+1) end)
+   smallButton("tabsnext","down",29+87*sidebarOpen,381-7*sidebarOpen,function() tabOffset=math.min(math.max(0,#app.Tabs-5),tabOffset+1) end)
   end
   box("keyhintBg",24,413,44+104*sidebarOpen,22,ink,.04,6,20)
   icon("keyhintIcon","key",29,414,muted,.7,42,0,.65)
@@ -952,7 +950,6 @@ local function render()
    glow("welcomeHalo",contentLeft+35,220+bob,28,28,.65*ca,24)
    icon("welcomeHouse","home",contentLeft+39,224+bob+enter*10,accent,ca,43,0,2.5)
    label("welcomeText","Welcome.",contentLeft+97,211+enter*12,34,ink,ca,true)
-
   else
   for i=1,4 do local c=selected.Controls[(selected.Page-1)*4+i];if c then renderControl(c,99+(i-1)*77,i);if not app.Alive then return end end end
   end
@@ -1012,3 +1009,21 @@ connection=run.RenderStepped:Connect(function()
  if not ok then warn("rimuru stopped: "..tostring(err));app:Destroy() end
 end)
 print("RIMURU UI loaded. "..keyName(app.Keybind).." toggles the menu.")
+
+-- =========================================================================
+-- [ YOUR SCRIPTS HERE ]
+-- =========================================================================
+-- app:AddTab({Title="Combat", Icon="bolt"}, function(tab)
+--   tab:AddToggle({Id="aim_on", Title="Aimbot", Description="hold to aim", Default=false})
+--   tab:AddKeybind({Title="Aim key"})
+--   tab:AddSlider({Id="aim_fov", Title="FOV", Min=10, Max=800, Step=1, Default=180})
+--   tab:AddDropdown({Id="aim_bone", Title="Hitbox", Options={"Head","Torso","Nearest"}, Default="Head"})
+-- end)
+-- run.RenderStepped:Connect(function()
+--   if app:GetValue("aim_on") then
+--     local fov=app:GetValue("aim_fov")
+--     local bone=app:GetValue("aim_bone")
+--     -- your code here
+--   end
+-- end)
+-- =========================================================================
