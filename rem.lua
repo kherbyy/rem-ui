@@ -5,6 +5,11 @@ if env["Nine".."MfgUI"] and env["Nine".."MfgUI"].Destroy then env["Nine".."MfgUI
 assert(Drawing and Drawing.new,"rimuru requires the Matcha Drawing API")
 local V,RGB=Vector2.new,Color3.fromRGB
 local unpackArgs=table.unpack or unpack
+
+-- Background: embedded base64 OR fetched from URL.
+local REM_BG_B64=""
+local REM_BG_URL="https://raw.githubusercontent.com/kherbyy/rem-ui/main/rimuru_bg.png"
+
 local themes={
  {Name="Purple",Accent=RGB(184,156,255),Text=RGB(239,230,255),Muted=RGB(185,169,213),Base=RGB(13,12,20)},
  {Name="Green",Accent=RGB(114,230,173),Text=RGB(224,255,239),Muted=RGB(153,200,178),Base=RGB(10,17,16)},
@@ -41,7 +46,32 @@ local targetTheme=1
 local tint,ink,muted,accent=themes[1].Base,themes[1].Text,themes[1].Muted,themes[1].Accent
 local avatarBytes=nil
 
--- intro state
+-- background state
+local REM_BG_BYTES=nil
+local imageReady=false
+local imageFailed=false
+
+do
+ local decodeFn=rawget(getfenv(),"base64decode") or rawget(getfenv(),"base64_decode") or _G.base64decode
+ if type(decodeFn)=="function" and #REM_BG_B64>8 then
+  local ok,decoded=pcall(decodeFn,REM_BG_B64)
+  if ok and type(decoded)=="string" and #decoded>8 then REM_BG_BYTES=decoded end
+ end
+end
+
+if not REM_BG_BYTES and #REM_BG_URL>8 then
+ task.spawn(function()
+  pcall(function()
+   local ok,bytes=pcall(function() return game:HttpGet(REM_BG_URL) end)
+   if not app.Alive then return end
+   if ok and type(bytes)=="string" and #bytes>8
+      and (bytes:sub(1,8)=="\137PNG\13\10\26\10" or bytes:sub(1,3)=="\255\216\255") then
+    REM_BG_BYTES=bytes
+   end
+  end)
+ end)
+end
+
 local introDone=false
 local introStart=nil
 local introSound=nil
@@ -50,27 +80,14 @@ local motionClock=0
 local visitTime=0
 local pulsePoints={}
 
--- background state (self-contained: drawn, no network)
-local imageFailed=false
-
 local PIXEL_REM_LINES={"Oh hi","<3","Nice!","Sob"}
-
-local pixelRem={
- awake=false,awakeUntil=0,wakeStart=-100,sleepStart=tick(),
- talk=nil,talkStart=0,talkUntil=0,lastTalk=nil,reactUntil=0,
- blinkAt=0,blinkUntil=0
-}
+local pixelRem={awake=false,awakeUntil=0,wakeStart=-100,sleepStart=tick(),talk=nil,talkStart=0,talkUntil=0,lastTalk=nil,reactUntil=0,blinkAt=0,blinkUntil=0}
 local function pixelRemTalk(now)
- local value=nil
- local tries=0
+ local value=nil;local tries=0
  repeat
-  value=PIXEL_REM_LINES[math.random(1,#PIXEL_REM_LINES)]
-  tries=tries+1
+  value=PIXEL_REM_LINES[math.random(1,#PIXEL_REM_LINES)];tries=tries+1
  until value~=pixelRem.lastTalk or tries>=5
- pixelRem.lastTalk=value
- pixelRem.talk=value
- pixelRem.talkStart=now
- pixelRem.talkUntil=now+2.35
+ pixelRem.lastTalk=value;pixelRem.talk=value;pixelRem.talkStart=now;pixelRem.talkUntil=now+2.35
  animations["pixelRemTalk"]=0
 end
 local function uid() sequence=sequence+1;return "r"..sequence end
@@ -83,7 +100,7 @@ local function obj(id,kind)
  if not e then
   local raw=Drawing.new(kind)
   local cache={}
-  local d=setmetatable({}, {
+  local d=setmetatable({},{
    __index=function(_,key)
     if key=="Remove" then return function() raw:Remove() end end
     return cache[key]
@@ -188,8 +205,7 @@ local function loadAvatar()
  app.AvatarStatus="loading"
  task.spawn(function()
   local ok=pcall(function()
-   local player=players.LocalPlayer
-   local userId=tonumber(player and player.UserId)
+   local userId=tonumber(players.LocalPlayer and players.LocalPlayer.UserId)
    if not userId or userId<=0 then return end
    local endpoint="https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds="..math.floor(userId).."&size=100x100&format=Png&isCircular=false"
    for attempt=1,3 do
@@ -370,7 +386,6 @@ local function glow(id,px,py,w,h,strength,z)
   box(id..j,px-spread,py-spread,w+spread*2,h+spread*2,accent,strength*app.EffectStrength*(4-j)*0.035,12+spread,z or 18)
  end
 end
-
 local function pixelZ(id,px,py,size,alpha,z)
  size=math.max(1,math.floor(size or 2))
  box(id.."a",px,py,size*4,size,ink,alpha,0,z)
@@ -379,13 +394,11 @@ local function pixelZ(id,px,py,size,alpha,z)
  box(id.."d",px+size,py+size*3,size,size,ink,alpha,0,z)
  box(id.."e",px,py+size*4,size*4,size,ink,alpha,0,z)
 end
-
 local function pixelSpark(id,px,py,alpha,z)
  box(id.."h",px-4,py,9,2,accent,alpha,0,z)
  box(id.."v",px,py-4,2,9,accent,alpha,0,z)
  box(id.."c",px,py,2,2,white,alpha,0,z+1)
 end
-
 local function pixelHeart(id,px,py,alpha,z)
  local p=2
  box(id.."1",px,py,p*2,p*2,accent,alpha,0,z)
@@ -394,8 +407,6 @@ local function pixelHeart(id,px,py,alpha,z)
  box(id.."4",px,py+p*3,p*5,p*2,accent,alpha,0,z)
  box(id.."5",px+p,py+p*5,p*3,p,accent,alpha,0,z)
 end
-
--- rimuru slime drawn from primitives (no external image needed)
 local function drawSlime(id,cx,cy,s,alpha,z,awake)
  local bodyW,bodyH=34*s,26*s
  local bodyCol=RGB(122,191,235)
@@ -422,11 +433,9 @@ local function drawSlime(id,cx,cy,s,alpha,z,awake)
   box(id.."_eyeR",cx+bodyW*.10,cy,4*s,1.5*s,eyeCol,alpha,0,z+2)
  end
 end
-
 local function renderPixelRem(now)
  local fade=ease("pixelRemVisible",app.PixelRem and app.Visible and introDone and 1 or 0,14)
  if fade<=0.005 then return end
-
  local anchorX=W-146
  local hUI=164
  local wUI=hUI*(385/796)
@@ -434,7 +443,6 @@ local function renderPixelRem(now)
  local topY=-(hUI*seatRatio)
  local slimeCX=anchorX
  local slimeCY=topY+hUI*.48
-
  if (not pixelRem.awake) and click and now>=pixelRem.reactUntil then
   local cx=x+anchorX*S
   local cy=y+(topY+hUI*.47)*S
@@ -448,7 +456,6 @@ local function renderPixelRem(now)
    pixelRem.reactUntil=now+.45
   end
  end
-
  if pixelRem.awake and now>=pixelRem.awakeUntil then
   pixelRem.awake=false
   pixelRem.sleepStart=now
@@ -461,7 +468,6 @@ local function renderPixelRem(now)
   pixelRem.talk=nil
   animations["pixelRemTalk"]=0
  end
-
  local showAwake=pixelRem.awake
  if pixelRem.awake then
   if pixelRem.blinkAt==0 then pixelRem.blinkAt=now+2.8+math.random()*2.4 end
@@ -472,11 +478,8 @@ local function renderPixelRem(now)
   end
   if pixelRem.talk=="Sob" and math.floor((now-pixelRem.talkStart)*6)%2==0 then showAwake=false end
  end
-
  drawSlime("pixelRemSlime",slimeCX,slimeCY,S*1.6,a*fade,63,showAwake)
-
  box("pixelRemSeatShadow",anchorX-23,-2,46,2,black,.16*fade,0,59)
-
  if not pixelRem.awake then
   local sleepAge=math.max(0,now-pixelRem.sleepStart)
   if not app.ReducedMotion then
@@ -490,11 +493,9 @@ local function renderPixelRem(now)
   local wakeAge=now-pixelRem.wakeStart
   if wakeAge>=0 and wakeAge<.42 and app.Effects then
    local wf=math.floor(wakeAge/.07)
-   local p=(1-wakeAge/.42)*fade
-   pixelSpark("pixelRemWakeA",anchorX+wUI*.42+7+(wf%2),topY+35-(wf%2),p,69)
+   pixelSpark("pixelRemWakeA",anchorX+wUI*.42+7+(wf%2),topY+35-(wf%2),(1-wakeAge/.42)*fade,69)
   end
  end
-
  if pixelRem.talk then
   local age=math.max(0,now-pixelRem.talkStart)
   local remaining=math.max(0,pixelRem.talkUntil-now)
@@ -505,7 +506,6 @@ local function renderPixelRem(now)
   local bh=29
   local bx=clamp(anchorX-wUI*.5-bw-10,12,W-bw-12)
   local by=topY+34-math.min(2,step)
-
   box("pixelRemBubbleShadow",bx+2,by+2,bw,bh,black,.27*bubbleA,0,65)
   box("pixelRemBubble",bx+2,by,bw-4,bh,mix(tint,white,.11),.98*bubbleA,0,66)
   box("pixelRemBubbleL",bx,by+3,2,bh-6,mix(tint,white,.11),.98*bubbleA,0,66)
@@ -514,7 +514,6 @@ local function renderPixelRem(now)
   box("pixelRemBubbleTail1",bx+bw-2,by+bh-8,5,5,mix(tint,white,.11),.98*bubbleA,0,66)
   box("pixelRemBubbleTail2",bx+bw+2,by+bh-4,4,4,mix(tint,white,.11),.98*bubbleA,0,66)
   label("pixelRemTalkText",textValue,bx+9,by+7,10.5,ink,bubbleA,true,68)
-
   if textValue=="<3" then
    local hp=(age*.85)%1
    local hs=math.floor(hp*7)
@@ -641,30 +640,25 @@ local function borderPoint(distance)
  local t=d/r+math.pi;return r+math.cos(t)*r,r+math.sin(t)*r
 end
 local function smooth(t) t=clamp(t,0,1);return t*t*t*(t*(t*6-15)+10) end
-
 local function renderCloseConfirm()
  if not closeConfirm and not closeConfirmClosing then return end
  local target=closeConfirmClosing and 0 or 1
  local reveal=ease("closeConfirm",target,closeConfirmClosing and 24 or 17)
  if closeConfirmClosing and reveal<0.015 then closeConfirm=false;closeConfirmClosing=false;return end
-
  local pop=app.ReducedMotion and 1 or (.965+.035*smooth(reveal))
  local mw,mh=400*pop,188*pop
  local px,py=W*.5-mw*.5,H*.5-mh*.5
  local aa=reveal
-
  box("closeConfirmDim",0,0,W,H,black,.24*aa,17,145)
  box("closeConfirmShadow",px-4,py+5,mw+8,mh+7,black,.16*aa,18,146)
  box("closeConfirmRim",px-1,py-1,mw+2,mh+2,mix(ink,accent,.22),.13*aa,17,147)
  box("closeConfirmPanel",px,py,mw,mh,mix(tint,black,.10),.72*aa,16,148)
-
  box("closeConfirmBadge",px+24,py+21,37,37,accent,.095*aa,10,150)
  icon("closeConfirmIcon","close",px+31.5,py+28.5,accent,.92*aa,153,0,1.02)
  label("closeConfirmKicker","UNLOAD RIMURU",px+75,py+20,9,accent,.72*aa,true,153)
  label("closeConfirmTitle","Are you sure?",px+75,py+37,22,ink,.96*aa,true,153)
  label("closeConfirmBody","This will completely unload the menu.",px+25,py+75,11,muted,.78*aa,false,153)
  box("closeConfirmRule",px+25,py+103,mw-50,1,ink,.055*aa,0,150)
-
  local by=py+119
  local gap=10
  local bw=(mw-50-gap)*.5
@@ -675,21 +669,17 @@ local function renderCloseConfirm()
  local yesOver=hit(yesX,by,bw,bh,true)
  local nh=ease("closeNoHover",noOver and 1 or 0,18)
  local yh=ease("closeYesHover",yesOver and 1 or 0,18)
-
  box("closeNo",noX,by,bw,bh,mix(tint,white,.025),(.30+.08*nh)*aa,10,151)
  box("closeNoRail",noX,by+11,2,21,muted,.22*nh*aa,1,154)
  label("closeNoText","No, keep it",noX+41+nh*2,by+14,12,mix(ink,accent,nh*.18),.92*aa,true,154)
-
  box("closeYesRim",yesX-1,by-1,bw+2,bh+2,accent,(.14+.13*yh)*aa,11,150)
  box("closeYes",yesX,by,bw,bh,accent,(.075+.10*yh)*aa,10,151)
  box("closeYesRail",yesX,by+11,2,21,accent,(.42+.28*yh)*aa,1,154)
  label("closeYesText","Yes, unload",yesX+37+yh*2,by+14,12,ink,.95*aa,true,154)
  icon("closeYesArrow","right",yesX+bw-30+yh*2,by+11,accent,.92*aa,155,0,.82+yh*.06)
-
  if noOver and click then click=false;cancelClose() end
  if yesOver and click then click=false;beginCloseAnimation() end
 end
-
 local function renderCloseEffects(now)
  if not closingStarted then return false end
  local elapsed=now-closingStarted
@@ -727,7 +717,6 @@ local function renderCloseEffects(now)
  if elapsed>=duration then app:Destroy();return true end
  return false
 end
-
 local function measureText(value,size,bold)
  local d=obj("__measure","Text")
  d.Text=tostring(value);d.Size=math.floor(size+0.5)
@@ -737,7 +726,6 @@ local function measureText(value,size,bold)
  if ok and type(bounds)=="Vector2" then return bounds.X end
  return #tostring(value)*size*0.55
 end
-
 local function renderIntro(now,vp)
  if introDone then return end
  if not introStart then introStart=now end
@@ -767,13 +755,11 @@ local function renderIntro(now,vp)
    end)
   end) end
  end
-
  local reveal=smooth(elapsed/.95)
  local leave=smooth((elapsed-2.65)/.60)
  local opacity=reveal*(1-leave)
  local scale=math.min(1,(vp.X-24)/420,(vp.Y-24)/136)
  local cx,cy=vp.X/2,vp.Y/2+(1-reveal)*8-leave*8
-
  local wordT=smooth((elapsed-1.10)/.42)
  local wordAlpha=opacity*wordT
  local wordY=cy - 25*scale + (1-wordT)*10*scale
@@ -781,10 +767,8 @@ local function renderIntro(now,vp)
  local word="rimuru"
  local wordW=measureText(word,wordSize,true)
  local wordX=cx - wordW/2
-
  txt("intro:echo",word,wordX-2*scale,wordY+1*scale,wordSize,white,wordAlpha*(1-wordT)*.22,true,116)
  txt("intro:word",word,wordX,wordY,wordSize,white,wordAlpha,true,117)
-
  local slimeAlpha=opacity*wordT
  if slimeAlpha>.01 then
   local slimeSize=wordSize*0.9
@@ -815,20 +799,10 @@ local function renderIntro(now,vp)
   slimeBox("shL",slimeCX-bodyW*.16,slimeCY-bodyH*.03,1*s,1*s,white,slimeAlpha,0)
   slimeBox("shR",slimeCX+bodyW*.12,slimeCY-bodyH*.03,1*s,1*s,white,slimeAlpha,0)
  end
-
  local lock=smooth((elapsed-1.64)/.34)
  local sweepW=wordW*lock
- rect("intro:logoSweep",
-  wordX + (wordW-sweepW)/2,
-  wordY+42*scale,
-  sweepW,
-  math.max(1,1.15*scale),
-  white,
-  opacity*(1-lock)*.34,
-  1,
-  116)
+ rect("intro:logoSweep",wordX+(wordW-sweepW)/2,wordY+42*scale,sweepW,math.max(1,1.15*scale),white,opacity*(1-lock)*.34,1,116)
 end
-
 local function render()
  local now=tick();dt=clamp(now-last,0,0.1);last=now;frame=frame+1
  if not app.ReducedMotion then motionClock=motionClock+dt end
@@ -885,11 +859,26 @@ local function render()
   for j=4,1,-1 do box("shadow"..j,-j*4,j*2,W+j*8,H+j*4,black,.035,18+j*4,4+j) end
   box("rim",-1,-1,W+2,H+2,ink,0.13,18,9)
   box("base",0,0,W,H,tint,.68,17,10)
-
-  -- self-contained background (gradient, no network)
-  box("bgTop",0,0,W,H*.5,mix(tint,accent,.05),.30,17,11)
-  box("bgBot",0,H*.5,W,H*.5,mix(tint,black,.18),.30,17,11)
-
+  if not imageFailed and REM_BG_BYTES then
+   local ok=pcall(function()
+    local image=obj("background","Image")
+    if not imageReady then
+     image.Data=REM_BG_BYTES
+     image.Color=white
+     imageReady=true
+    end
+    image.Position=V(x,y)
+    image.Size=V(W*S,H*S)
+    image.Rounding=17*S
+    image.Transparency=0.42*a
+    image.ZIndex=11
+    image.Visible=true
+   end)
+   if not ok then imageFailed=true end
+  else
+   box("bgTop",0,0,W,H*.5,mix(tint,accent,.05),.30,17,11)
+   box("bgBot",0,H*.5,W,H*.5,mix(tint,black,.18),.30,17,11)
+  end
   box("tint",0,0,W,H,tint,0.18,17,12)
   if app.Effects then
    local strength=app.EffectStrength
@@ -918,10 +907,8 @@ local function render()
    icon("brandMark","rimuru",32.5,32.5,accent,1,42)
   end
   label("brand","rimuru",70,25,27,ink,sidebarText,true)
-
   box("headerRule",contentLeft,78,761-contentLeft,1,ink,.075,0,20)
   label("sectionSub","",contentLeft+1,59,11,muted,contentA)
-
   for i=1,math.min(5,#app.Tabs-tabOffset) do
    local tab=app.Tabs[i+tabOffset];local enter=ease(tab.Id.."appear",1,11);local py=101+(i-1)*53+(1-enter)*9
    local over=hit(21,py,navWidth,43)
@@ -951,7 +938,7 @@ local function render()
    icon("welcomeHouse","home",contentLeft+39,224+bob+enter*10,accent,ca,43,0,2.5)
    label("welcomeText","Welcome.",contentLeft+97,211+enter*12,34,ink,ca,true)
   else
-  for i=1,4 do local c=selected.Controls[(selected.Page-1)*4+i];if c then renderControl(c,99+(i-1)*77,i);if not app.Alive then return end end end
+   for i=1,4 do local c=selected.Controls[(selected.Page-1)*4+i];if c then renderControl(c,99+(i-1)*77,i);if not app.Alive then return end end end
   end
   if pages>1 then
    label("pagenumber",selected.Page.." / "..pages,632,421,11,muted,1)
@@ -994,11 +981,11 @@ local function render()
   end
   local strokes=paths[n.kind=="success" and "check" or n.kind=="error" and "close" or "info"]
   if not avatarShown then
-  for j,p in ipairs(strokes) do
-   local d=obj(id.."icon"..j,"Line");d.From=V(tx+20+p[1],ty+22+p[2]);d.To=V(tx+20+p[3],ty+22+p[4]);d.Thickness=1.6
-   d.Color=c;d.Transparency=opacity;d.ZIndex=103;d.Visible=true
+   for j,p in ipairs(strokes) do
+    local d=obj(id.."icon"..j,"Line");d.From=V(tx+20+p[1],ty+22+p[2]);d.To=V(tx+20+p[3],ty+22+p[4]);d.Thickness=1.6
+    d.Color=c;d.Transparency=opacity;d.ZIndex=103;d.Visible=true
+   end
   end
- end
  end
  for _,e in pairs(pool) do if e.frame~=frame then e.d.Visible=false end end
 end
